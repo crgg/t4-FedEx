@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  fedex_api:
+      build: .
+      container_name: t4_fedex_api
+      command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+      volumes:
+        - .:/app
+      ports:
+        - "8001:8000"
+      depends_on:
+        - fedex_db
+        - fedex_redis
+      networks:
+        - t4_internal_network
+
+  fedex_celery_worker:
+    build: .
+    container_name: t4_fedex_worker
+    command: celery -A main.celery_app worker --loglevel=info
+    volumes:
+      - .:/app
+    depends_on:
+      - fedex_redis
+      - fedex_db
+    networks:
+      - t4_internal_network
+
+  fedex_db:
+    image: postgres:15-alpine
+    container_name: t4_fedex_db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: t4inventory_fedex
+    # CAMBIO: Eliminamos el mapeo de puertos (ports: "5432:5432"). 
+    # Solo los contenedores de esta red necesitan acceder a esta BD. 
+    # Esto evita colisiones si el backend principal ya tiene su propio Postgres corriendo en tu Mac.
+    networks:
+      - t4_internal_network
+
+  fedex_redis:
+    image: redis:7-alpine
+    container_name: t4_fedex_redis
+    # CAMBIO: Eliminamos el mapeo "6379:6379" por la misma razón que la base de datos.
+    networks:
+      - t4_internal_network
+
+# CAMBIO CRÍTICO: Red compartida
+networks:
+  t4_internal_network:
+    name: t4_global_network
+    # Si el proyecto grande ya tiene un docker-compose corriendo, 
+    # pondrías 'external: true' para conectarte a su red existente.
+    driver: bridge

@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+pydantic
+httpx
+authlib
+celery
+redis
+sqlalchemy[asyncio]
+asyncpg
+boto3
+psycopg2-binary
+psycopg[binary]
+alembic
+python-dotenv
