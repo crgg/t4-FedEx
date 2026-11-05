@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -24,6 +26,7 @@ class RateRequest(BaseModel):
 
 
 class ShipRequest(BaseModel):
+    order_id: int = Field(..., gt=0, description="ID de la orden en T4Inventory")
     origin_zip: str
     dest_zip: str
     weight_kg: float
@@ -35,6 +38,7 @@ class ShipRequest(BaseModel):
 
 
 class PickupRequest(BaseModel):
+    order_ids: list[int] = Field(..., min_length=1, description="Órdenes a recolectar (deben estar en LABEL_CREATED)")
     location_zip: str
     total_weight: float
     package_count: int
@@ -52,3 +56,8 @@ class EndOfDayRequest(BaseModel):
 
 class WebhookPayload(BaseModel):
     trackResults: list = []
+
+
+class MockStripeWebhook(BaseModel):
+    order_id: int = Field(..., gt=0)
+    payment_status: Literal["succeeded", "failed", "processing", "canceled"]

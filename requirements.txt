@@ -12,3 +12,7 @@ psycopg2-binary
 psycopg[binary]
 alembic
 python-dotenv
+PyJWT
+passlib[bcrypt]
+bcrypt==4.0.1
+python-multipart
