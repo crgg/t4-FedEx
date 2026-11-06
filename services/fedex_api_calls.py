@@ -25,12 +25,10 @@ load_dotenv()
 
 FEDEX_API_KEY = os.getenv("FEDEX_API_KEY")
 FEDEX_SECRET_KEY = os.getenv("FEDEX_SECRET_KEY")
-FEDEX_ACCOUNT_NUMBER = os.getenv("FEDEX_ACCOUNT_NUMBER")
 
 _missing = [name for name, value in {
     "FEDEX_API_KEY": FEDEX_API_KEY,
     "FEDEX_SECRET_KEY": FEDEX_SECRET_KEY,
-    "FEDEX_ACCOUNT_NUMBER": FEDEX_ACCOUNT_NUMBER,
 }.items() if not value]
 if _missing:
     raise RuntimeError(f"Faltan variables de entorno en .env: {', '.join(_missing)}")
@@ -100,9 +98,9 @@ async def call_validate_address(req: AddressValidationRequest) -> dict:
 
 
 # ---- 2. COTIZACIÓN ----
-async def call_get_rates(req: RateRequest) -> dict:
+async def call_get_rates(req: RateRequest, client_account_number: str) -> dict:
     payload = {
-        "accountNumber": {"value": FEDEX_ACCOUNT_NUMBER},
+        "accountNumber": {"value": client_account_number},
         "requestedShipment": {
             "shipper": {"address": {"postalCode": req.origin_zip, "countryCode": "US"}},
             "recipient": {"address": {"postalCode": req.dest_zip, "countryCode": "US", "residential": req.is_residential}},
@@ -118,12 +116,19 @@ async def call_get_rates(req: RateRequest) -> dict:
 
 
 # ---- 3. CREACIÓN DE ENVÍO (ETIQUETA PDF) ----
-async def call_create_shipment(local_id: str, ship_data: dict, client_name: str, client_phone: str) -> dict:
-    """Crea el envío en FedEx y devuelve {"tracking_number", "label_url"}."""
+async def call_create_shipment(
+    local_id: str,
+    ship_data: dict,
+    client_name: str,
+    client_phone: str,
+    client_account_number: str,
+) -> dict:
+    """Crea el envío en FedEx con la cuenta del cliente y devuelve {"tracking_number", "label_url"}."""
     if FEDEX_MOCK_SHIP:
         return {
             "tracking_number": f"MOCK{uuid.uuid4().int % 10**12:012d}",
             "label_url": f"https://t4inventory.com/labels/{local_id}.pdf",
+            "account_number": client_account_number,
         }
 
     dims = ship_data["dimensions"]
@@ -134,12 +139,11 @@ async def call_create_shipment(local_id: str, ship_data: dict, client_name: str,
     if ship_data.get("signature_required"):
         package["packageSpecialServices"] = {"signatureOptionType": "DIRECT"}
 
-    # TODO: FedEx exige direcciones y contactos completos (streetLines, city,
-    # stateOrProvinceCode). Hoy solo tenemos códigos postales, por lo que el
-    # sandbox rechazará la petición hasta que ShipRequest los incluya.
+    # FedEx exige que shippingChargesPayment inyecte dinámicamente client_account_number
+    # en responsibleParty.accountNumber con paymentType SENDER.
     payload = {
         "labelResponseOptions": "URL_ONLY",
-        "accountNumber": {"value": FEDEX_ACCOUNT_NUMBER},
+        "accountNumber": {"value": client_account_number},
         "requestedShipment": {
             "shipper": {
                 "contact": {"personName": "T4Inventory", "phoneNumber": client_phone},
@@ -152,7 +156,16 @@ async def call_create_shipment(local_id: str, ship_data: dict, client_name: str,
             "serviceType": "FEDEX_GROUND",
             "packagingType": "YOUR_PACKAGING",
             "pickupType": "USE_SCHEDULED_PICKUP",
-            "shippingChargesPayment": {"paymentType": "SENDER"},
+            "shippingChargesPayment": {
+                "paymentType": "SENDER",
+                "payor": {
+                    "responsibleParty": {
+                        "accountNumber": {
+                            "value": client_account_number,
+                        }
+                    }
+                },
+            },
             "labelSpecification": {"imageType": "PDF", "labelStockType": "PAPER_85X11_TOP_HALF_LABEL"},
             "requestedPackageLineItems": [package],
         },
@@ -166,13 +179,17 @@ async def call_create_shipment(local_id: str, ship_data: dict, client_name: str,
 
 
 # ---- ANULACIÓN DE ENVÍO ----
-async def call_cancel_shipment(tracking_number: str) -> dict:
-    """Anula el envío en FedEx para evitar cargos en la cuenta corporativa."""
+async def call_cancel_shipment(tracking_number: str, client_account_number: str) -> dict:
+    """Anula el envío en FedEx para evitar cargos en la cuenta del cliente."""
     if FEDEX_MOCK_SHIP:
-        return {"cancelledShipment": True, "trackingNumber": tracking_number}
+        return {
+            "cancelledShipment": True,
+            "trackingNumber": tracking_number,
+            "accountNumber": client_account_number,
+        }
 
     payload = {
-        "accountNumber": {"value": FEDEX_ACCOUNT_NUMBER},
+        "accountNumber": {"value": client_account_number},
         "trackingNumber": tracking_number,
         "deletionControl": "DELETE_ALL_PACKAGES",
     }

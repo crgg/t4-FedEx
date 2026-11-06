@@ -54,8 +54,13 @@ class EndOfDayRequest(BaseModel):
     date: str
 
 
-class WebhookPayload(BaseModel):
-    trackResults: list = []
+class FedExWebhookPayload(BaseModel):
+    tracking_number: str | None = None
+    status: str | None = None
+    trackResults: list[dict] | None = None
+
+
+WebhookPayload = FedExWebhookPayload
 
 
 class MockStripeWebhook(BaseModel):

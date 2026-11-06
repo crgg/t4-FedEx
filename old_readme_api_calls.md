@@ -1,3 +1,7 @@
+PARA VER EL NUEVO CRUD, VER /docs/SIMULADORES.md
+
+---
+
 Aquí tienes el bloque de texto completo, incluyendo el párrafo introductorio, la lista del 1 al 7 y la nueva sección con las 5 APIs perfectamente integradas al final. Está listo para que lo copies y pegues directamente en tu `README.md`:
 
 ---

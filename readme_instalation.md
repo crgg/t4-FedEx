@@ -56,41 +56,57 @@ Cada librería seleccionada cumple una función específica dentro de la propues
 
 ---
 
-## 3. Orquestación del Entorno (Docker)
+## 3. Despliegue y Orquestación con Docker
 
-La orquestación de la arquitectura (API, Worker de Celery, Redis y PostgreSQL) se ejecuta mediante contenedores de Docker.
+Para levantar y dejar 100% operativo el microservicio y su base de datos PostgreSQL, se deben ejecutar los siguientes 3 comandos en orden:
+
+### 1. Construir y levantar los contenedores
 
 ```bash
 docker-compose up -d --build
-
 ```
 
-**¿Por qué usamos este comando?**
-
-* `docker-compose up`: Lee el archivo `docker-compose.yml` y arranca todos los microservicios interconectados (FastAPI, Postgres, Redis, Celery Worker) bajo una misma red virtual.
-* `-d` (*detached*): Libera tu terminal, ejecutando los contenedores en segundo plano.
-* `--build`: Obliga a Docker a reconstruir las imágenes desde cero leyendo los últimos cambios del `Dockerfile` y de tu `requirements.txt`, asegurando un entorno fresco.
+- **`docker-compose up`**: Arranca todos los microservicios interconectados (FastAPI, PostgreSQL, Redis, Celery Worker) bajo la red virtual compartida.
+- **`-d`** (*detached*): Ejecuta los contenedores en segundo plano.
+- **`--build`**: Reconstruye las imágenes desde cero leyendo los últimos cambios del `Dockerfile` y `requirements.txt`.
 
 ---
 
-## 4. Migraciones de la Base de Datos (Alembic)
+### 2. Ejecutar las migraciones de base de datos (Alembic)
 
-Una vez que los contenedores (incluyendo la base de datos PostgreSQL) están ejecutándose, es necesario estructurar las tablas internamente utilizando Alembic.
+Aplica el historial de migraciones para crear las tablas (`stores`, `shipments`), los tipos `enum` e índices en PostgreSQL:
 
 ```bash
-docker exec -it t4_fedex_api alembic revision --autogenerate -m "Crear tabla shipments"
-docker exec -it t4_fedex_api alembic upgrade head
-
+docker compose exec fedex_api alembic upgrade head
 ```
 
-**Explicación de los Comandos:**
-El diseño del PRD exige una persistencia estructurada. Como la API se está ejecutando dentro de un contenedor Docker llamado `t4_fedex_api`, debemos enviar comandos hacia el interior del mismo usando `docker exec -it`.
+- **`alembic upgrade head`**: Toma todas las revisiones del directorio `alembic/versions` y las impacta directamente en PostgreSQL hasta la versión más reciente (`head`).
 
-1. **`alembic revision --autogenerate ...`**: Alembic lee tu código (el modelo `Shipment` en `models.py`) y lo compara con el estado actual de la base de datos vacía. Al notar que faltan tablas e índices, "autogenera" un archivo Python (migración) con las instrucciones SQL exactas para crear la estructura.
-2. **`alembic upgrade head`**: Toma ese archivo generado y lo aplica (impacta) directamente contra la base de datos de PostgreSQL, actualizándola a su última versión (`head`).
+---
 
-Una vez completados estos pasos, la arquitectura estará en pie y la API estará lista para recibir peticiones POST a través de Postman en el puerto mapeado.
+### 3. Crear la tienda inicial (Seed en PostgreSQL)
 
+Al ser una arquitectura SaaS multi-tenant, la emisión de JWTs y la gestión de envíos requieren la existencia de al menos una tienda (tenant). Se ejecuta el siguiente comando para registrar la tienda de prueba con su número de cuenta de FedEx:
+
+```bash
+docker compose exec fedex_api python -c "
+import asyncio, os
+from dotenv import load_dotenv
+load_dotenv()
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from models import Store
+
+async def seed():
+    engine = create_async_engine(os.environ['DB_URL'])
+    async with async_sessionmaker(engine)() as session, session.begin():
+        session.add(Store(id=1, name='Tienda Principal', fedex_account_number='740980114'))
+    await engine.dispose()
+    print('Tienda 1 creada exitosamente.')
+
+asyncio.run(seed())
+"
 ```
 
-```
+---
+
+Una vez completados estos 3 pasos, la arquitectura estará en pie y lista para recibir peticiones a través de Postman en `http://localhost:8001`.

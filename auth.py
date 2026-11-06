@@ -14,7 +14,7 @@ from typing import Optional
 
 import jwt
 from dotenv import load_dotenv
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
 from pydantic import BaseModel
@@ -57,6 +57,7 @@ class Token(BaseModel):
 
 class CurrentUser(BaseModel):
     username: str
+    store_id: Optional[int] = None  # Tenant del token (siempre presente tras verify_token)
 
 
 # ---- CONTRASEÑAS ----
@@ -81,10 +82,11 @@ def authenticate_user(username: str, password: str) -> Optional[CurrentUser]:
 
 
 # ---- TOKENS ----
-def create_access_token(subject: str, expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(subject: str, store_id: int, expires_delta: Optional[timedelta] = None) -> str:
+    """Emite un JWT ligado a un tenant: `store_id` es obligatorio."""
     now = datetime.now(timezone.utc)
     expire = now + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
-    payload = {"sub": subject, "iat": now, "exp": expire}
+    payload = {"sub": subject, "store_id": store_id, "iat": now, "exp": expire}
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
@@ -97,21 +99,32 @@ def _credentials_exception(detail: str) -> HTTPException:
 
 
 # ---- DEPENDENCIA DE FASTAPI ----
-async def verify_token(token: str = Depends(oauth2_scheme)) -> CurrentUser:
-    """Valida firma y vigencia del JWT y retorna el usuario autenticado."""
+async def verify_token(request: Request, token: str = Depends(oauth2_scheme)) -> CurrentUser:
+    """Valida firma y vigencia del JWT, extrae el tenant y retorna el usuario.
+
+    El `store_id` queda disponible de dos formas:
+      - `request.state.store_id` (para dependencias que solo reciben el Request)
+      - en el `CurrentUser` devuelto (`Depends(get_current_user)` en la ruta)
+    """
     try:
         payload = jwt.decode(
             token,
             SECRET_KEY,
             algorithms=[ALGORITHM],
-            options={"require": ["exp", "sub"]},
+            options={"require": ["exp", "sub", "store_id"]},
         )
     except jwt.ExpiredSignatureError:
         raise _credentials_exception("Token expirado")
     except jwt.InvalidTokenError:
+        # Incluye tokens antiguos emitidos sin store_id
         raise _credentials_exception("Token inválido")
 
-    return CurrentUser(username=payload["sub"])
+    store_id = payload["store_id"]
+    if not isinstance(store_id, int) or isinstance(store_id, bool):
+        raise _credentials_exception("Token inválido: store_id mal formado")
+
+    request.state.store_id = store_id
+    return CurrentUser(username=payload["sub"], store_id=store_id)
 
 
 # Alias semántico para endpoints que necesiten el usuario

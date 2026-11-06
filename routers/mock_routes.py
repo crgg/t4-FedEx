@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import verify_token
 from dependencies import get_celery, get_db
-from models import Shipment, ShipmentStatus
+from models import Shipment, ShipmentStatus, Store
 from schemas import MockStripeWebhook
 from services.shipment_state import transition
 
@@ -46,7 +46,9 @@ async def mock_stripe_webhook(
 
         transition(shipment, ShipmentStatus.PAID)
         local_id = shipment.local_id
+        store = await session.get(Store, shipment.store_id) if shipment.store_id else None
+        client_account_number = store.fedex_account_number if store else None
 
-    # Se dispara DESPU\u00c9S del commit para que el worker ya vea el estado PAID.
-    celery_app.send_task(LABEL_TASK, args=[local_id])
-    return {"order_id": event.order_id, "status": ShipmentStatus.PAID, "detail": "Pago confirmado; generaci\u00f3n de etiqueta encolada"}
+    # Se dispara DESPUÉS del commit para que el worker ya vea el estado PAID.
+    celery_app.send_task(LABEL_TASK, args=[local_id, client_account_number])
+    return {"order_id": event.order_id, "status": ShipmentStatus.PAID, "detail": "Pago confirmado; generación de etiqueta encolada"}
